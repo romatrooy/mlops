@@ -1,0 +1,76 @@
+stages:
+  download:
+    cmd: python src/data/download.py
+    outs:
+      - data/raw
+
+  preprocess:
+    cmd: python src/data/preprocess.py
+    deps:
+      - data/raw
+      - src/data/preprocess.py
+      - params.yaml
+    outs:
+      - data/processed
+
+  augment:
+    cmd: python src/data/augment.py
+    deps:
+      - data/raw
+      - src/data/augment.py
+    outs:
+      - data/augmented
+
+  # Эксперименты без аугментации
+  train_simple_orig:
+    cmd: python src/models/train.py --model simple_cnn --epochs 5
+    deps:
+      - data/raw
+      - src/models/train.py
+      - params.yaml
+    outs:
+      - models/simple_cnn_orig_best.pt
+    metrics:
+      - reports/metrics_simple_orig.json:
+          cache: false
+
+  train_resnet_orig:
+    cmd: python src/models/train.py --model resnet18 --epochs 5
+    deps:
+      - data/raw
+      - src/models/train.py
+    outs:
+      - models/resnet18_orig_best.pt
+
+  train_mobilenet_orig:
+    cmd: python src/models/train.py --model mobilenet_v2 --epochs 5
+    deps:
+      - data/raw
+      - src/models/train.py
+    outs:
+      - models/mobilenet_v2_orig_best.pt
+
+  # Эксперименты с аугментацией
+  train_simple_aug:
+    cmd: python src/models/train.py --model simple_cnn --augmented --epochs 5
+    deps:
+      - data/augmented
+      - src/models/train.py
+    outs:
+      - models/simple_cnn_aug_best.pt
+
+  train_resnet_aug:
+    cmd: python src/models/train.py --model resnet18 --augmented --epochs 5
+    deps:
+      - data/augmented
+      - src/models/train.py
+    outs:
+      - models/resnet18_aug_best.pt
+
+  train_mobilenet_aug:
+    cmd: python src/models/train.py --model mobilenet_v2 --augmented --epochs 5
+    deps:
+      - data/augmented
+      - src/models/train.py
+    outs:
+      - models/mobilenet_v2_aug_best.pt

@@ -1,0 +1,13 @@
+torch>=2.0.0
+torchvision>=0.15.0
+mlflow>=2.10.0
+dvc>=3.0.0
+dvc-gdrive          # или dvc-s3 / dvc-ssh — по вашему remote
+scikit-learn
+matplotlib
+seaborn
+pandas
+numpy
+tqdm
+pyyaml
+pillow

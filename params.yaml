@@ -1,0 +1,19 @@
+data:
+  image_size: 28
+  batch_size: 64
+  num_workers: 2
+
+train:
+  epochs: 5
+  lr: 0.001
+  models:
+    - simple_cnn
+    - resnet18
+    - mobilenet_v2
+
+augmentation:
+  num_augmented_per_image: 2
+  transforms:
+    - RandomHorizontalFlip
+    - RandomRotation
+    - ColorJitter
