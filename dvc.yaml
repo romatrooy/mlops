@@ -1,76 +1,154 @@
 stages:
+  # 1. Загрузка исходных данных (Fashion-MNIST)
   download:
     cmd: python src/data/download.py
     outs:
       - data/raw
 
+  # 2. Предобработка: трансформации + train/val сплит
   preprocess:
     cmd: python src/data/preprocess.py
     deps:
       - data/raw
       - src/data/preprocess.py
-      - params.yaml
+    params:
+      - data.image_size
+      - data.batch_size
+      - data.num_workers
+      - data.val_split
     outs:
       - data/processed
 
+  # 3. Аугментация: генерация нового датасета
   augment:
     cmd: python src/data/augment.py
     deps:
       - data/raw
       - src/data/augment.py
+    params:
+      - augmentation.num_augmented_per_image
+      - augmentation.transforms
     outs:
       - data/augmented
 
-  # Эксперименты без аугментации
+  # 4. Эксперименты на исходных данных (orig)
   train_simple_orig:
-    cmd: python src/models/train.py --model simple_cnn --epochs 5
+    cmd: python src/models/train.py --model simple_cnn --epochs ${train.epochs} --lr ${train.lr}
     deps:
       - data/raw
+      - data/processed
       - src/models/train.py
-      - params.yaml
+    params:
+      - train.epochs
+      - train.lr
+      - data.batch_size
+      - data.num_workers
+      - data.image_size
     outs:
       - models/simple_cnn_orig_best.pt
     metrics:
-      - reports/metrics_simple_orig.json:
+      - reports/metrics_simple_cnn_orig.json:
           cache: false
 
   train_resnet_orig:
-    cmd: python src/models/train.py --model resnet18 --epochs 5
+    cmd: python src/models/train.py --model resnet18 --epochs ${train.epochs} --lr ${train.lr}
     deps:
       - data/raw
+      - data/processed
       - src/models/train.py
+    params:
+      - train.epochs
+      - train.lr
+      - data.batch_size
+      - data.num_workers
+      - data.image_size
     outs:
       - models/resnet18_orig_best.pt
+    metrics:
+      - reports/metrics_resnet18_orig.json:
+          cache: false
 
   train_mobilenet_orig:
-    cmd: python src/models/train.py --model mobilenet_v2 --epochs 5
+    cmd: python src/models/train.py --model mobilenet_v2 --epochs ${train.epochs} --lr ${train.lr}
     deps:
       - data/raw
+      - data/processed
       - src/models/train.py
+    params:
+      - train.epochs
+      - train.lr
+      - data.batch_size
+      - data.num_workers
+      - data.image_size
     outs:
       - models/mobilenet_v2_orig_best.pt
+    metrics:
+      - reports/metrics_mobilenet_v2_orig.json:
+          cache: false
 
-  # Эксперименты с аугментацией
+  # 5. Те же эксперименты на исходных + аугментированных данных (aug)
   train_simple_aug:
-    cmd: python src/models/train.py --model simple_cnn --augmented --epochs 5
+    cmd: python src/models/train.py --model simple_cnn --augmented --epochs ${train.epochs} --lr ${train.lr}
     deps:
       - data/augmented
       - src/models/train.py
+    params:
+      - train.epochs
+      - train.lr
+      - data.batch_size
+      - data.num_workers
+      - data.image_size
     outs:
       - models/simple_cnn_aug_best.pt
+    metrics:
+      - reports/metrics_simple_cnn_aug.json:
+          cache: false
 
   train_resnet_aug:
-    cmd: python src/models/train.py --model resnet18 --augmented --epochs 5
+    cmd: python src/models/train.py --model resnet18 --augmented --epochs ${train.epochs} --lr ${train.lr}
     deps:
       - data/augmented
       - src/models/train.py
+    params:
+      - train.epochs
+      - train.lr
+      - data.batch_size
+      - data.num_workers
+      - data.image_size
     outs:
       - models/resnet18_aug_best.pt
+    metrics:
+      - reports/metrics_resnet18_aug.json:
+          cache: false
 
   train_mobilenet_aug:
-    cmd: python src/models/train.py --model mobilenet_v2 --augmented --epochs 5
+    cmd: python src/models/train.py --model mobilenet_v2 --augmented --epochs ${train.epochs} --lr ${train.lr}
     deps:
       - data/augmented
       - src/models/train.py
+    params:
+      - train.epochs
+      - train.lr
+      - data.batch_size
+      - data.num_workers
+      - data.image_size
     outs:
       - models/mobilenet_v2_aug_best.pt
+    metrics:
+      - reports/metrics_mobilenet_v2_aug.json:
+          cache: false
+
+  # 6. Сравнение экспериментов (с аугментацией и без)
+  evaluate:
+    cmd: python src/evaluate.py
+    deps:
+      - src/evaluate.py
+      - reports/metrics_simple_cnn_orig.json
+      - reports/metrics_resnet18_orig.json
+      - reports/metrics_mobilenet_v2_orig.json
+      - reports/metrics_simple_cnn_aug.json
+      - reports/metrics_resnet18_aug.json
+      - reports/metrics_mobilenet_v2_aug.json
+    metrics:
+      - reports/comparison.csv:
+          cache: false

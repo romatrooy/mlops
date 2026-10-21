@@ -1,15 +1,36 @@
-import os
-import yaml
+"""Обучение моделей на Fashion-MNIST (исходные и аугментированные данные).
+
+Каждый запуск сохраняет:
+  * метрики  -> reports/metrics_{model}_{orig|aug}.json  (их читает src/evaluate.py
+                и отслеживает DVC через metrics в dvc.yaml);
+  * чекпоинт -> models/{model}_{orig|aug}_best.pt;
+  * трекинг эксперимента -> MLflow (локальная папка mlruns/).
+
+Примеры:
+  python src/models/train.py --model simple_cnn
+  python src/models/train.py --model resnet18 --augmented --epochs 5
+"""
+import argparse
+import inspect
+import json
+from pathlib import Path
+
+import mlflow
+import mlflow.pytorch
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms, models
-import mlflow
-import mlflow.pytorch
+import yaml
 from sklearn.metrics import accuracy_score, classification_report
+from torch.utils.data import DataLoader, Subset
+from torchvision import datasets, models, transforms
 from tqdm import tqdm
-import argparse
+
+FASHION_MNIST_CLASSES = [
+    "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
+    "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot",
+]
+
 
 # ---------- Модели ----------
 class SimpleCNN(nn.Module):
@@ -21,11 +42,12 @@ class SimpleCNN(nn.Module):
             nn.Conv2d(64, 128, 3, padding=1), nn.ReLU(), nn.AdaptiveAvgPool2d(1)
         )
         self.classifier = nn.Linear(128, num_classes)
-    
+
     def forward(self, x):
         x = self.features(x)
         x = x.view(x.size(0), -1)
         return self.classifier(x)
+
 
 def get_model(name: str, num_classes=10, pretrained=True):
     if name == "simple_cnn":
@@ -42,6 +64,7 @@ def get_model(name: str, num_classes=10, pretrained=True):
         return model
     else:
         raise ValueError(f"Unknown model: {name}")
+
 
 # ---------- Обучение ----------
 def train_one_epoch(model, loader, criterion, optimizer, device):
@@ -61,6 +84,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     acc = accuracy_score(targets, preds)
     return running_loss / len(loader.dataset), acc
 
+
 def evaluate(model, loader, criterion, device):
     model.eval()
     running_loss = 0.0
@@ -76,100 +100,226 @@ def evaluate(model, loader, criterion, device):
     acc = accuracy_score(targets, preds)
     return running_loss / len(loader.dataset), acc, preds, targets
 
-def run_experiment(model_name: str, data_dir: str, use_augmented: bool,
-                   epochs: int, lr: float, batch_size: int, experiment_name: str):
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}, Model: {model_name}, Augmented: {use_augmented}")
-    
+
+# ---------- Данные ----------
+def load_params(path="params.yaml"):
+    path = Path(path)
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def limit_dataset(dataset, limit):
+    """Ограничение размера набора (для быстрых проверок пайплайна)."""
+    if limit and 0 < limit < len(dataset):
+        return Subset(dataset, list(range(int(limit))))
+    return dataset
+
+
+def build_datasets(use_augmented: bool, image_size: int):
     transform = transforms.Compose([
-        transforms.Resize(28),
+        transforms.Resize((image_size, image_size)),
+        # страховка: любые входные изображения приводятся к 1 каналу
+        transforms.Grayscale(num_output_channels=1),
         transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
+        transforms.Normalize((0.5,), (0.5,)),
     ])
-    
+
+    test_ds = datasets.FashionMNIST(root="data/raw", train=False,
+                                    download=False, transform=transform)
+
     if use_augmented:
-        # ImageFolder для аугментированных данных
-        train_ds = datasets.ImageFolder(os.path.join(data_dir, "train"), transform=transform)
-        # Для простоты берём оригинальный test
-        test_ds = datasets.FashionMNIST(root="data/raw", train=False, download=False, transform=transform)
+        train_root = Path("data/augmented/train")
+        if not train_root.exists():
+            raise FileNotFoundError(
+                f"Не найден {train_root}. Сначала выполните: python src/data/augment.py")
+        train_ds = datasets.ImageFolder(train_root, transform=transform)
+
+        expected = {f"{i:02d}": i for i in range(len(FASHION_MNIST_CLASSES))}
+        if dict(train_ds.class_to_idx) != expected:
+            raise ValueError(
+                "Порядок классов в data/augmented не совпадает с FashionMNIST: "
+                f"{train_ds.class_to_idx}. Перегенерируйте датасет: python src/data/augment.py")
     else:
-        full = datasets.FashionMNIST(root="data/raw", train=True, download=False, transform=transform)
-        train_size = int(0.9 * len(full))
-        val_size = len(full) - train_size
-        train_ds, _ = torch.utils.data.random_split(full, [train_size, val_size])
-        test_ds = datasets.FashionMNIST(root="data/raw", train=False, download=False, transform=transform)
-    
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
-    
+        full = datasets.FashionMNIST(root="data/raw", train=True,
+                                     download=False, transform=transform)
+        split_info = Path("data/processed/split_info.pt")
+        if split_info.exists():
+            indices = torch.load(split_info, weights_only=False)["train_indices"]
+            train_ds = Subset(full, list(indices))
+        else:
+            # тот же сплит, что и в src/data/preprocess.py
+            train_size = int(0.9 * len(full))
+            train_ds, _ = torch.utils.data.random_split(
+                full, [train_size, len(full) - train_size],
+                generator=torch.Generator().manual_seed(42))
+
+    return train_ds, test_ds
+
+
+# ---------- Эксперимент ----------
+def run_experiment(model_name: str, use_augmented: bool, epochs: int, lr: float,
+                   batch_size: int, num_workers: int, image_size: int,
+                   experiment_name: str, limit=None, models_dir="models",
+                   reports_dir="reports", params_file="params.yaml"):
+    suffix = "aug" if use_augmented else "orig"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device} | Model: {model_name} | "
+          f"Dataset: {'augmented' if use_augmented else 'original'}")
+
+    train_ds, test_ds = build_datasets(use_augmented, image_size)
+    train_ds = limit_dataset(train_ds, limit)
+    test_ds = limit_dataset(test_ds, limit)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False,
+                             num_workers=num_workers)
+
     model = get_model(model_name).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    
+
+    # Пример входа нужен MLflow для сериализации модели (формат pt2)
+    sample_input, _ = next(iter(test_loader))
+
+    Path(models_dir).mkdir(parents=True, exist_ok=True)
+    Path(reports_dir).mkdir(parents=True, exist_ok=True)
+    ckpt_path = Path(models_dir) / f"{model_name}_{suffix}_best.pt"
+    metrics_path = Path(reports_dir) / f"metrics_{model_name}_{suffix}.json"
+
     mlflow.set_experiment(experiment_name)
-    
-    with mlflow.start_run(run_name=f"{model_name}_{'aug' if use_augmented else 'orig'}"):
+    history = []
+    best_acc = 0.0
+
+    with mlflow.start_run(run_name=f"{model_name}_{suffix}"):
         mlflow.log_params({
             "model": model_name,
             "epochs": epochs,
             "lr": lr,
             "batch_size": batch_size,
+            "image_size": image_size,
             "augmented": use_augmented,
-            "dataset": "Fashion-MNIST"
+            "train_size": len(train_ds),
+            "dataset": "Fashion-MNIST",
         })
-        
-        best_acc = 0.0
+        if Path(params_file).exists():
+            mlflow.log_artifact(params_file)
+
         for epoch in range(epochs):
             train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
             test_loss, test_acc, _, _ = evaluate(model, test_loader, criterion, device)
-            
+
+            history.append({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "train_acc": train_acc,
+                "test_loss": test_loss,
+                "test_acc": test_acc,
+            })
             mlflow.log_metrics({
                 "train_loss": train_loss,
                 "train_acc": train_acc,
                 "test_loss": test_loss,
-                "test_acc": test_acc
+                "test_acc": test_acc,
             }, step=epoch)
-            
-            print(f"Epoch {epoch+1}/{epochs} | Train Acc: {train_acc:.4f} | Test Acc: {test_acc:.4f}")
-            
+
+            print(f"Epoch {epoch + 1}/{epochs} | Train Acc: {train_acc:.4f} | Test Acc: {test_acc:.4f}")
+
             if test_acc > best_acc:
                 best_acc = test_acc
-                torch.save(model.state_dict(), f"models/{model_name}_{'aug' if use_augmented else 'orig'}_best.pt")
-        
+                torch.save(model.state_dict(), ckpt_path)
+
         # Финальная оценка
         _, final_acc, preds, targets = evaluate(model, test_loader, criterion, device)
-        mlflow.log_metric("final_test_acc", final_acc)
-        
         report = classification_report(targets, preds, output_dict=True)
+        mlflow.log_metric("final_test_acc", final_acc)
+        mlflow.log_metric("best_test_acc", best_acc)
         mlflow.log_dict(report, "classification_report.json")
-        
-        # Логируем модель
-        mlflow.pytorch.log_model(model, "model")
-        
-        print(f"Best Test Accuracy: {best_acc:.4f}")
-        return best_acc
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--augmented", action="store_true")
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--batch_size", type=int, default=64)
+        if "name" in inspect.signature(mlflow.pytorch.log_model).parameters:
+            # MLflow 3.x: по умолчанию формат pt2 требует TensorSpec-сигнатуру,
+            # для учебного проекта достаточно pickle
+            mlflow.pytorch.log_model(model, name="model", input_example=sample_input,
+                                     serialization_format="pickle")
+        else:
+            mlflow.pytorch.log_model(model, artifact_path="model",
+                                     input_example=sample_input)  # MLflow 2.x
+
+        metrics_record = {
+            "model": model_name,
+            "augmented": use_augmented,
+            "dataset": "augmented" if use_augmented else "original",
+            "epochs": epochs,
+            "lr": lr,
+            "batch_size": batch_size,
+            "image_size": image_size,
+            "num_workers": num_workers,
+            "limit": limit,
+            "train_size": len(train_ds),
+            "test_size": len(test_ds),
+            "best_test_acc": best_acc,
+            "final_test_acc": final_acc,
+            "history": history,
+            "class_names": FASHION_MNIST_CLASSES,
+            "classification_report": report,
+        }
+        metrics_path.write_text(json.dumps(metrics_record, indent=2, ensure_ascii=False),
+                                encoding="utf-8")
+        mlflow.log_artifact(str(metrics_path))
+        if ckpt_path.exists():
+            mlflow.log_artifact(str(ckpt_path))
+
+    print(f"Best Test Accuracy: {best_acc:.4f}")
+    print(f"Метрики сохранены: {metrics_path}")
+    return best_acc
+
+
+def main():
+    params = load_params()
+    data_params = params.get("data", {})
+    train_params = params.get("train", {})
+
+    parser = argparse.ArgumentParser(description="Обучение моделей на Fashion-MNIST")
+    parser.add_argument("--model", type=str, required=True,
+                        choices=["simple_cnn", "resnet18", "mobilenet_v2"])
+    parser.add_argument("--augmented", action="store_true",
+                        help="использовать аугментированный датасет (data/augmented)")
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--num_workers", type=int, default=None)
+    parser.add_argument("--image_size", type=int, default=None)
+    parser.add_argument("--limit", type=int, default=None,
+                        help="ограничить число изображений (быстрая проверка пайплайна)")
+    parser.add_argument("--experiment", type=str, default=None,
+                        help="имя эксперимента MLflow")
+    parser.add_argument("--params", type=str, default="params.yaml")
     args = parser.parse_args()
-    
-    os.makedirs("models", exist_ok=True)
-    
-    experiment = "fashion_mnist_aug" if args.augmented else "fashion_mnist_orig"
-    data_dir = "data/augmented" if args.augmented else "data/raw"
-    
+
+    epochs = args.epochs if args.epochs is not None else train_params.get("epochs", 5)
+    lr = args.lr if args.lr is not None else train_params.get("lr", 1e-3)
+    batch_size = args.batch_size if args.batch_size is not None else data_params.get("batch_size", 64)
+    num_workers = args.num_workers if args.num_workers is not None else data_params.get("num_workers", 2)
+    image_size = args.image_size if args.image_size is not None else data_params.get("image_size", 28)
+
+    experiment = args.experiment or (
+        "fashion_mnist_aug" if args.augmented else "fashion_mnist_orig")
+
     run_experiment(
         model_name=args.model,
-        data_dir=data_dir,
         use_augmented=args.augmented,
-        epochs=args.epochs,
-        lr=args.lr,
-        batch_size=args.batch_size,
-        experiment_name=experiment
+        epochs=epochs,
+        lr=lr,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        image_size=image_size,
+        experiment_name=experiment,
+        limit=args.limit,
+        params_file=args.params,
     )
+
+
+if __name__ == "__main__":
+    main()

@@ -2,6 +2,7 @@ data:
   image_size: 28
   batch_size: 64
   num_workers: 2
+  val_split: 0.1
 
 train:
   epochs: 5
@@ -17,3 +18,4 @@ augmentation:
     - RandomHorizontalFlip
     - RandomRotation
     - ColorJitter
+    - RandomAffine
