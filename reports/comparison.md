@@ -1,0 +1,8 @@
+| experiment | model | dataset | epochs | lr | train_size | best_test_acc | final_test_acc |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| mobilenet_v2_aug | mobilenet_v2 | augmented | 5 | 0.0010 | 180000 | 0.9158 | 0.9158 |
+| mobilenet_v2_orig | mobilenet_v2 | original | 5 | 0.0010 | 54000 | 0.9046 | 0.9046 |
+| resnet18_aug | resnet18 | augmented | 5 | 0.0010 | 180000 | 0.9119 | 0.9119 |
+| resnet18_orig | resnet18 | original | 5 | 0.0010 | 54000 | 0.8994 | 0.8969 |
+| simple_cnn_aug | simple_cnn | augmented | 5 | 0.0010 | 180000 | 0.8937 | 0.8937 |
+| simple_cnn_orig | simple_cnn | original | 5 | 0.0010 | 54000 | 0.8527 | 0.8488 |

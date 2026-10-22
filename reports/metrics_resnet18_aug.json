@@ -1,0 +1,139 @@
+{
+  "model": "resnet18",
+  "augmented": true,
+  "dataset": "augmented",
+  "epochs": 5,
+  "lr": 0.001,
+  "batch_size": 64,
+  "image_size": 28,
+  "num_workers": 2,
+  "limit": null,
+  "train_size": 180000,
+  "test_size": 10000,
+  "best_test_acc": 0.9119,
+  "final_test_acc": 0.9119,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.5222661563078562,
+      "train_acc": 0.8083666666666667,
+      "test_loss": 0.3610916021347046,
+      "test_acc": 0.8667
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.36212798835436505,
+      "train_acc": 0.8667722222222223,
+      "test_loss": 0.30259517235755923,
+      "test_acc": 0.885
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.31347182953887515,
+      "train_acc": 0.8831777777777777,
+      "test_loss": 0.25816816744804383,
+      "test_acc": 0.9039
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.2776216681904263,
+      "train_acc": 0.8968,
+      "test_loss": 0.24058240957260132,
+      "test_acc": 0.91
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.24484521457486683,
+      "train_acc": 0.908,
+      "test_loss": 0.24465231080055236,
+      "test_acc": 0.9119
+    }
+  ],
+  "class_names": [
+    "T-shirt/top",
+    "Trouser",
+    "Pullover",
+    "Dress",
+    "Coat",
+    "Sandal",
+    "Shirt",
+    "Sneaker",
+    "Bag",
+    "Ankle boot"
+  ],
+  "classification_report": {
+    "0": {
+      "precision": 0.8314917127071824,
+      "recall": 0.903,
+      "f1-score": 0.8657718120805369,
+      "support": 1000.0
+    },
+    "1": {
+      "precision": 0.9979695431472081,
+      "recall": 0.983,
+      "f1-score": 0.9904282115869018,
+      "support": 1000.0
+    },
+    "2": {
+      "precision": 0.834870848708487,
+      "recall": 0.905,
+      "f1-score": 0.8685220729366603,
+      "support": 1000.0
+    },
+    "3": {
+      "precision": 0.8964862298195632,
+      "recall": 0.944,
+      "f1-score": 0.9196298100340965,
+      "support": 1000.0
+    },
+    "4": {
+      "precision": 0.878755364806867,
+      "recall": 0.819,
+      "f1-score": 0.8478260869565217,
+      "support": 1000.0
+    },
+    "5": {
+      "precision": 0.9907216494845361,
+      "recall": 0.961,
+      "f1-score": 0.9756345177664975,
+      "support": 1000.0
+    },
+    "6": {
+      "precision": 0.8189252336448598,
+      "recall": 0.701,
+      "f1-score": 0.7553879310344828,
+      "support": 1000.0
+    },
+    "7": {
+      "precision": 0.9066788655077768,
+      "recall": 0.991,
+      "f1-score": 0.94696607740086,
+      "support": 1000.0
+    },
+    "8": {
+      "precision": 0.9839679358717435,
+      "recall": 0.982,
+      "f1-score": 0.982982982982983,
+      "support": 1000.0
+    },
+    "9": {
+      "precision": 0.9862142099681867,
+      "recall": 0.93,
+      "f1-score": 0.957282552753474,
+      "support": 1000.0
+    },
+    "accuracy": 0.9119,
+    "macro avg": {
+      "precision": 0.9126081593666411,
+      "recall": 0.9118999999999999,
+      "f1-score": 0.9110432055533014,
+      "support": 10000.0
+    },
+    "weighted avg": {
+      "precision": 0.912608159366641,
+      "recall": 0.9119,
+      "f1-score": 0.9110432055533014,
+      "support": 10000.0
+    }
+  }
+}
